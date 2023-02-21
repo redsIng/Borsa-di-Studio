@@ -1,3 +1,6 @@
 
 withingTest/.idea
 *.csv
+withingTest.zip
+.credentials
+withingTest/__pycache__/Withings.cpython-310.pyc

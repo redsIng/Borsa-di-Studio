@@ -4,7 +4,13 @@
     make a call to the API and save the measurements in a .csv file.
     To get the example working you need to:
     0. create a Withings account and get your client_id and consumer_secret
-    1. install withings_api with: pip install withings-api
+    1. install withings_api with: pip install withings-api in your virtual environment
+    (If you are using Anaconda:
+    1.1. create a virtual environment with: conda create -n your_env_name python=3.7
+    1.2. activate the virtual environment with: conda activate your_env_name
+    1.3. install withings_api with: pip install withings-api
+    If you are using Jupyter Notebook:
+    1.1. Insert the following code in a cell:!pip install withings-api)
 
     @author: Andrea Efficace, Loreno Rossi
 """
@@ -12,6 +18,10 @@ import os
 from os import path
 import pickle
 from typing import cast
+from wsgiref import headers
+
+import requests
+from _cffi_backend import callback
 from oauthlib.oauth2 import MissingTokenError
 from withings_api import WithingsAuth, WithingsApi, AuthScope
 from withings_api.common import MeasureType, GetSleepField, \
@@ -102,6 +112,34 @@ sd = input("Start date (DD/MM/YYYY): ")
 ed = input("End date (DD/MM/YYYY): ")
 start_date = get_date(sd)
 end_date = get_date(ed)
+start_datetm = int(start_date.timestamp())
+end_datetm = int(end_date.timestamp())
+import time
+import datetime
+start_date = datetime.date(2023,2,1)
+end_date = datetime.date(2023,2,12)
+
+unixtime = time.mktime(start_date.timetuple())
+unixtime1 = time.mktime(end_date.timetuple())
+#url = f'https://wbsapi.withings.net/v2/rawdata?action=get&hash_deviceid=2e11be304313d1e525e09392971dddec7e46a0d8&rawdata_type=1&startdate={unixtime}&enddate={unixtime1}'
+# &startdateymd={start_date}&enddateymd={start_date}
+#url = f'https://wbsapi.withings.net/v2/measure?action=getintradayactivity&startdateymd={start_date}&enddateymd={end_date}&access_token={api.get_credentials().access_token}&appi_d={client_id}&appi_secret={consumer_secret}&data_fields=heart_rate'
+url = f'https://wbsapi.withings.net/v2/measure?action=getintradayactivity&startdate={unixtime}&enddate={unixtime1}&data_fields=heart_rate&access_token={api.get_credentials().access_token}'
+url = f'https://wbsapi.withings.net/v2/rawdata?action=get&hash_deviceid=2e11be304313d1e525e09392971dddec7e46a0d8&rawdata_type=1&startdate={unixtime}&enddate={unixtime1}'
+response = requests.get(url)
+if response.status_code == 200:
+    data = response.json()
+    # Stampa i dati di misurazioni raw HR
+    for measure in data['body']['measuregrps']:
+        for measure_type in measure['measures']:
+            if measure_type['type'] == 16:
+                print(f"Timestamp: {measure['date']} - Raw HR: {measure_type['value']}")
+else:
+    print("Errore nella richiesta delle misurazioni raw HR")
+
+
+
+
 
 # Procedure to get all avaiable measurements from the API.
 # The measurements are saved in a dictionary with the name of the measurement as key.
@@ -119,7 +157,46 @@ df_dict= {}
 # Each data query is parsed and saved in a dataframe.
 measurements = api.measure_get_meas(startdate=start_date, enddate=end_date)
 measure_types = [getattr(MeasureType, attr) for attr in dir(MeasureType) if not callable(getattr(MeasureType, attr)) and not attr.startswith("__") and not attr=='UNKNOWN']
+measurements = api.measure_get_meas(startdate=start_date, enddate=end_date,offset=0,
+                                    lastupdate=None)
+api.request(path="/v2/user",params={"action":"getdevice"})
 
+api.notify_list()
+# function to get unix timestamp from date hour minute second
+
+def get_timestamp(date,hour,minute,second):
+    return arrow.get(date, 'DD/MM/YYYY').replace(hour=hour, minute=minute, second=second).timestamp
+
+start_datetm = get_timestamp("10/02/2023",9,40,0)
+end_datetm = get_timestamp("11/02/2023",13,00,00)
+# get unix timestamp from date DD-MM-YYYY HH:MM:SS
+std = arrow.get("10/02/2023", 'DD/MM/YYYY').replace(hour=9, minute=40, second=0).timestamp
+etd = arrow.get("11/02/2023", 'DD/MM/YYYY').replace(hour=9, minute=40, second=0).timestamp
+
+
+
+d = datetime.date(2023,2,10)
+d1 = datetime.date(2023,2,11)
+
+unixtime = time.mktime(d.timetuple())
+unixtime1 = time.mktime(d1.timetuple())
+response = api.measure_get_meas(meastype=MeasureType.WEIGHT,
+                                    category=MeasureGetMeasGroupCategory(1),
+                                    startdate=start_date,
+                                    enddate=end_date,
+                                    offset=0,
+                                    lastupdate=None
+                                    )
+api.request("measure",params={"action":'getmeas',"meastype":[1,4,5,6,8,9,10,11,12,54,71,73,76,77,88,91,123,135,136,137,138,139]})
+api.request("measure",params={"action":'getworkouts',"lastupdate":int(unixtime)})
+
+
+'''
+raw_data = api.request("v2/rawdata",params={"action":'get',
+                                                 "hash_deviceid":'2e11be304313d1e525e09392971dddec7e46a0d8',
+                                                 "rawdata_type":1,
+                                                 "startdate":1676806891,
+                                                 "enddate":1676806891})
 for measure_type in measure_types:
     response = api.measure_get_meas(meastype=measure_type,
                                     category=MeasureGetMeasGroupCategory(1),
@@ -128,6 +205,7 @@ for measure_type in measure_types:
                                     offset=0,
                                     lastupdate=None
                                     )
+
     if response.measuregrps:
         dfdata=response.measuregrps
         column = response.measuregrps[0].__fields_set__
@@ -139,38 +217,25 @@ for measure_type in measure_types:
             os.remove(str(measure_type).split('.')[1]+".csv")
         df_data.to_csv(str(measure_type).split('.')[1]+".csv", index=False)
 
-# Activity measurements
-activity_measure = api.measure_get_activity(data_fields=GetActivityField,
-                                            offset=0,
-                                            startdateymd=start_date,
-                                            enddateymd=end_date)
+# data in unix timestamp
 
-# Creating Dataframes to store the data
-activity_data = activity_measure.activities
-columns = list(activity_data[0].__fields_set__)
-activity_df = create_df_from_data(activity_data)
-if path.isfile("ACTIVITY_DATA.csv" + ".csv"):
-    os.remove("ACTIVITY_DATA.csv" + ".csv")
-# Storing in a .csv file the data
-activity_df.to_csv("ACTIVITY_DATA.csv", index=False)
+sleep = api.sleep_get(data_fields=GetSleepField,startdate=arrow.utcnow().shift(days=-arrow.utcnow().date().day+1).format('YYYY-MM-DD')
+              , enddate=arrow.utcnow().format('YYYY-MM-DD'))
 
-# ECG measurements
-heart_measure = api.heart_list(startdate=start_date, enddate=end_date)
-heart_columns = list(heart_measure.series[0].__fields_set__)
-heart_columns.append('ecg')
-heart_data = heart_measure.series
-heart_df = pd.DataFrame(heart_measure.series,columns = heart_columns)
-# cancellare heart_data.csv se esiste all'interno della cartella
-if path.isfile("HEART_DATA.csv"):
-    os.remove("HEART_DATA.csv")
-heart_df.to_csv("HEART_DATA.csv", index=False)
+'''
+while 1:
+    notify1=api.notify_get(callbackurl= callback_uri)
+    print(notify1)
+    notify2=api.notify_subscribe(callbackurl= callback_uri)
+    print(notify2)
 
-# Sleep measurements are taken for the current month
-sleep_measure = api.request(path="v2/sleep",
-                            params={"action":"getsummary",
-                                    "startdateymd": arrow.utcnow().shift(days=-arrow.utcnow().date().day+1).format('YYYY-MM-DD'),
-                                    "enddateymd": arrow.utcnow().format("YYYY-MM-DD")})
-sleep_df = pd.DataFrame(sleep_measure['series'])
-if path.isfile("SLEEP_DATA.csv"):
-    os.remove("SLEEP_DATA.csv")
-sleep_df.to_csv("SLEEP_DATA.csv", index=False)
+
+
+
+
+
+
+
+
+
+
